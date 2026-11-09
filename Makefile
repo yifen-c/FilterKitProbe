@@ -27,6 +27,15 @@ FilterKitProbe_REQUIRES_IPHONE_OS := YES
 FilterKitProbe_MAIN_NIB_FILE :=
 FilterKitProbe_PRERENDERED_ICONS := YES
 
+# 打包配置
+PACKAGE_NAME = com.filterkit.probe
+PACKAGE_VERSION = 0.0.1
+PACKAGE_DESCRIPTION = RootHide 环境验证工具 - 只读探测
+PACKAGE_MAINTAINER = yifen <https://yfen.cn>
+PACKAGE_AUTHOR = yifen
+PACKAGE_SECTION = Utilities
+PACKAGE_DEPENDS = firmware (>= 15.0)
+
 include $(THEOS_MAKE_PATH)/application.mk
 
 # 手动复制 Info.plist
