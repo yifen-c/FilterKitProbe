@@ -1,11 +1,7 @@
 #import "FKPAppListViewController.h"
 #import <mach-o/dyld.h>
 
-@implementation FKPAppListViewController {
-    UITextView *_textView;
-    NSString *_jbrootPath;
-    NSString *_configPath;
-}
+@implementation FKPAppListViewController
 
 - (void)appendPlist:(NSDictionary *)plist toResult:(NSMutableString *)result indent:(NSString *)indent {
     for (NSString *key in plist.allKeys) {
@@ -16,17 +12,51 @@
             [self appendPlist:value toResult:result indent:[indent stringByAppendingString:@"  "]];
         } else if ([value isKindOfClass:[NSArray class]]) {
             [result appendFormat:@"%@%@: 数组 (%lu 项)\n", indent, key, (unsigned long)[(NSArray *)value count]];
-        } else {
+            NSArray *array = (NSArray *)value;
+            for (NSUInteger i = 0; i < array.count && i < 20; i++) {
+                id item = array[i];
+                if ([item isKindOfClass:[NSDictionary class]]) {
+                    [result appendFormat:@"%@  [%lu]: 字典\n", indent, (unsigned long)i];
+                    [self appendPlist:item toResult:result indent:[indent stringByAppendingString:@"    "]];
+                } else {
+                    [result appendFormat:@"%@  [%lu]: %@\n", indent, (unsigned long)i, item];
+                }
+            }
+            if (array.count > 20) {
+                [result appendFormat:@"%@  ... 还有 %lu 项\n", indent, (unsigned long)(array.count - 20)];
+            }
+        } else if ([value isKindOfClass:[NSString class]]) {
             [result appendFormat:@"%@%@: %@\n", indent, key, value];
+        } else if ([value isKindOfClass:[NSNumber class]]) {
+            [result appendFormat:@"%@%@: %@\n", indent, key, value];
+        } else {
+            [result appendFormat:@"%@%@: %@\n", indent, key, [value class]];
         }
     }
 }
 
-- (NSString *)getJbrootPath {
-    if (_jbrootPath) return _jbrootPath;
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"RootHide App List";
+    self.view.backgroundColor = [UIColor blackColor];
+    
+    UITextView *textView = [[UITextView alloc] initWithFrame:self.view.bounds];
+    textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    textView.backgroundColor = [UIColor blackColor];
+    textView.textColor = [UIColor whiteColor];
+    textView.font = [UIFont systemFontOfSize:10];
+    textView.editable = NO;
+    
+    NSMutableString *result = [NSMutableString string];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    
+    // 反推 jbroot 根目录
+    [result appendString:@"=== 反推 jbroot 根目录 ===\n\n"];
     
     char path[PATH_MAX];
     uint32_t size = sizeof(path);
+    NSString *jbrootPath = nil;
+    
     if (_NSGetExecutablePath(path, &size) == 0) {
         NSString *execPath = [NSString stringWithUTF8String:path];
         NSRange range = [execPath rangeOfString:@".jbroot-"];
@@ -35,169 +65,91 @@
             if (slashRange.location != NSNotFound) {
                 NSRange endRange = [execPath rangeOfString:@"/" options:0 range:NSMakeRange(range.location + range.length, execPath.length - range.location - range.length)];
                 if (endRange.location != NSNotFound) {
-                    _jbrootPath = [execPath substringToIndex:endRange.location];
+                    jbrootPath = [execPath substringToIndex:endRange.location];
+                    [result appendFormat:@"jbroot 根: %@\n\n", jbrootPath];
                 }
             }
         }
     }
-    return _jbrootPath;
-}
-
-- (void)refreshView {
-    NSMutableString *result = [NSMutableString string];
-    NSFileManager *fm = [NSFileManager defaultManager];
     
-    NSString *jbroot = [self getJbrootPath];
-    NSString *myBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    [result appendString:@"=== 实验：appconfig 隔离测试 ===\n\n"];
-    
-    [result appendFormat:@"当前 App Bundle ID: %@\n", myBundleID];
-    [result appendFormat:@"jbroot 路径: %@\n\n", jbroot];
-    
-    // 测试：能不能看到 jbroot 下的关键文件
-    [result appendString:@"--- 当前可见性测试 ---\n"];
-    
-    if (jbroot) {
-        NSString *testFile = [jbroot stringByAppendingPathComponent:@"var/mobile/Library/RootHide/RootHideConfig.plist"];
-        BOOL canSee = [fm fileExistsAtPath:testFile];
-        [result appendFormat:@"能看到 RootHideConfig.plist: %@\n", canSee ? @"是" : @"否"];
+    if (jbrootPath) {
+        // 详细解析 RootHide 目录
+        NSString *rootHideDir = [jbrootPath stringByAppendingPathComponent:@"var/mobile/Library/RootHide"];
+        [result appendString:@"========================================\n"];
+        [result appendString:@"=== RootHideConfig.plist 完整内容 ===\n"];
+        [result appendString:@"========================================\n\n"];
         
-        NSString *pluginDir = [jbroot stringByAppendingPathComponent:@"Library/MobileSubstrate/DynamicLibraries"];
-        BOOL canSeePlugins = [fm fileExistsAtPath:pluginDir];
-        [result appendFormat:@"能看到插件目录: %@\n", canSeePlugins ? @"是" : @"否"];
-    } else {
-        [result appendString:@"看不到 jbroot 路径（已被隔离）\n"];
-    }
-    
-    // 读取 appconfig
-    [result appendString:@"\n--- 当前 appconfig 列表 ---\n"];
-    
-    if (jbroot) {
-        NSString *configPath = [jbroot stringByAppendingPathComponent:@"var/mobile/Library/RootHide/RootHideConfig.plist"];
-        _configPath = configPath;
+        NSString *configPath = [rootHideDir stringByAppendingPathComponent:@"RootHideConfig.plist"];
+        BOOL configExists = [fm fileExistsAtPath:configPath];
+        [result appendFormat:@"路径: %@\n", configPath];
+        [result appendFormat:@"存在: %@\n\n", configExists ? @"是" : @"否"];
         
-        NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:configPath];
-        if (plist) {
-            NSDictionary *appconfig = plist[@"appconfig"];
-            if (appconfig) {
-                [result appendFormat:@"共 %lu 个 App:\n", (unsigned long)appconfig.count];
-                for (NSString *bundleID in appconfig.allKeys) {
-                    BOOL isMe = [bundleID isEqualToString:myBundleID];
-                    [result appendFormat:@"  - %@%@\n", bundleID, isMe ? @" ← 我自己" : @""];
+        if (configExists) {
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:configPath];
+            if (plist) {
+                [self appendPlist:plist toResult:result indent:@""];
+            } else {
+                [result appendString:@"解析失败\n"];
+            }
+        }
+        
+        // 解析 varCleanRules.plist
+        [result appendString:@"\n========================================\n"];
+        [result appendString:@"=== varCleanRules.plist ===\n"];
+        [result appendString:@"========================================\n\n"];
+        
+        NSString *cleanRulesPath = [rootHideDir stringByAppendingPathComponent:@"varCleanRules.plist"];
+        BOOL cleanRulesExists = [fm fileExistsAtPath:cleanRulesPath];
+        [result appendFormat:@"存在: %@\n\n", cleanRulesExists ? @"是" : @"否"];
+        
+        if (cleanRulesExists) {
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:cleanRulesPath];
+            if (plist) {
+                [self appendPlist:plist toResult:result indent:@""];
+            }
+        }
+        
+        // 解析 varCleanRules-custom.plist
+        [result appendString:@"\n========================================\n"];
+        [result appendString:@"=== varCleanRules-custom.plist ===\n"];
+        [result appendString:@"========================================\n\n"];
+        
+        NSString *customPath = [rootHideDir stringByAppendingPathComponent:@"varCleanRules-custom.plist"];
+        BOOL customExists = [fm fileExistsAtPath:customPath];
+        [result appendFormat:@"存在: %@\n\n", customExists ? @"是" : @"否"];
+        
+        if (customExists) {
+            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:customPath];
+            if (plist) {
+                [self appendPlist:plist toResult:result indent:@""];
+            }
+        }
+        
+        // Preferences 目录里的其他 plist
+        [result appendString:@"\n========================================\n"];
+        [result appendString:@"=== Preferences 目录其他 plist ===\n"];
+        [result appendString:@"========================================\n\n"];
+        
+        NSString *prefsDir = [jbrootPath stringByAppendingPathComponent:@"var/mobile/Library/Preferences"];
+        NSArray *prefs = [fm contentsOfDirectoryAtPath:prefsDir error:nil];
+        
+        for (NSString *pref in prefs) {
+            if ([pref containsString:@"roothide"] || [pref containsString:@"ellekit"] || [pref containsString:@"jail"]) {
+                NSString *prefPath = [prefsDir stringByAppendingPathComponent:pref];
+                [result appendFormat:@"--- %@ ---\n", pref];
+                NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:prefPath];
+                if (plist) {
+                    [self appendPlist:plist toResult:result indent:@"  "];
+                } else {
+                    [result appendString:@"  解析失败\n"];
                 }
-                
-                BOOL isInList = appconfig[myBundleID] != nil;
-                [result appendFormat:@"\n我在 appconfig 里: %@\n", isInList ? @"是" : @"否"];
+                [result appendString:@"\n"];
             }
         }
     }
     
-    [result appendString:@"\n--- 操作说明 ---\n"];
-    [result appendString:@"点击下面按钮，然后重启 App，观察可见性变化\n"];
-    
-    _textView.text = result;
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"App List 实验";
-    self.view.backgroundColor = [UIColor blackColor];
-    
-    // 顶部按钮区
-    UIView *buttonView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 100)];
-    buttonView.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    buttonView.backgroundColor = [UIColor darkGrayColor];
-    
-    UIButton *addButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [addButton setTitle:@"加入 appconfig" forState:UIControlStateNormal];
-    addButton.frame = CGRectMake(20, 20, 140, 40);
-    addButton.titleLabel.font = [UIFont systemFontOfSize:14];
-    addButton.backgroundColor = [UIColor systemBlueColor];
-    [addButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    addButton.layer.cornerRadius = 8;
-    [addButton addTarget:self action:@selector(addToAppConfig) forControlEvents:UIControlEventTouchUpInside];
-    [buttonView addSubview:addButton];
-    
-    UIButton *removeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [removeButton setTitle:@"从 appconfig 移除" forState:UIControlStateNormal];
-    removeButton.frame = CGRectMake(180, 20, 160, 40);
-    removeButton.titleLabel.font = [UIFont systemFontOfSize:14];
-    removeButton.backgroundColor = [UIColor systemRedColor];
-    [removeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    removeButton.layer.cornerRadius = 8;
-    [removeButton addTarget:self action:@selector(removeFromAppConfig) forControlEvents:UIControlEventTouchUpInside];
-    [buttonView addSubview:removeButton];
-    
-    [self.view addSubview:buttonView];
-    
-    // 文本区
-    _textView = [[UITextView alloc] initWithFrame:CGRectMake(0, 100, self.view.bounds.size.width, self.view.bounds.size.height - 100)];
-    _textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    _textView.backgroundColor = [UIColor blackColor];
-    _textView.textColor = [UIColor whiteColor];
-    _textView.font = [UIFont systemFontOfSize:11];
-    _textView.editable = NO;
-    [self.view addSubview:_textView];
-    
-    [self refreshView];
-}
-
-- (void)addToAppConfig {
-    NSString *jbroot = [self getJbrootPath];
-    if (!jbroot) return;
-    
-    NSString *configPath = [jbroot stringByAppendingPathComponent:@"var/mobile/Library/RootHide/RootHideConfig.plist"];
-    NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:configPath];
-    if (!plist) return;
-    
-    NSMutableDictionary *mutablePlist = [plist mutableCopy];
-    NSMutableDictionary *appconfig = [mutablePlist[@"appconfig"] mutableCopy];
-    if (!appconfig) {
-        appconfig = [NSMutableDictionary dictionary];
-    }
-    
-    NSString *myBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    appconfig[myBundleID] = @1;
-    mutablePlist[@"appconfig"] = appconfig;
-    
-    BOOL success = [mutablePlist writeToFile:configPath atomically:YES];
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"操作结果"
-                                                                   message:success ? @"已加入 appconfig，请重启 App 观察效果" : @"写入失败"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        (void)action;
-        [self refreshView];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)removeFromAppConfig {
-    NSString *jbroot = [self getJbrootPath];
-    if (!jbroot) return;
-    
-    NSString *configPath = [jbroot stringByAppendingPathComponent:@"var/mobile/Library/RootHide/RootHideConfig.plist"];
-    NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:configPath];
-    if (!plist) return;
-    
-    NSMutableDictionary *mutablePlist = [plist mutableCopy];
-    NSMutableDictionary *appconfig = [mutablePlist[@"appconfig"] mutableCopy];
-    
-    NSString *myBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    [appconfig removeObjectForKey:myBundleID];
-    mutablePlist[@"appconfig"] = appconfig;
-    
-    BOOL success = [mutablePlist writeToFile:configPath atomically:YES];
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"操作结果"
-                                                                   message:success ? @"已从 appconfig 移除，请重启 App 观察效果" : @"写入失败"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        (void)action;
-        [self refreshView];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    textView.text = result;
+    [self.view addSubview:textView];
 }
 
 @end

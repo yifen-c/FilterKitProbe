@@ -1,8 +1,8 @@
 Package: com.filterkit.probe
 Name: FilterKitProbe
-Version: 0.0.4
+Version: 1.0
 Architecture: iphoneos-arm64
-Description: RootHide 环境验证工具 - 只读探测
+Description: FilterKit 技术信息采集工具
 Maintainer: yifen <https://yfen.cn>
 Author: yifen
 Section: Utilities
