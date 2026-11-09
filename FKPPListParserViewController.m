@@ -1,4 +1,5 @@
 #import "FKPPListParserViewController.h"
+#import <mach-o/dyld.h>
 
 @implementation FKPPListParserViewController
 
@@ -17,42 +18,60 @@
     NSMutableString *result = [NSMutableString string];
     NSFileManager *fm = [NSFileManager defaultManager];
     
-    // 找所有可能的插件目录
-    NSMutableArray *allPluginDirs = [NSMutableArray array];
+    // 先反推 jbroot 根目录
+    [result appendString:@"=== 反推 jbroot 根目录 ===\n\n"];
     
-    // 标准目录
-    NSArray *standardDirs = @[
-        @"/Library/MobileSubstrate/DynamicLibraries",
-        @"/var/jb/Library/MobileSubstrate/DynamicLibraries"
-    ];
-    [allPluginDirs addObjectsFromArray:standardDirs];
+    char path[PATH_MAX];
+    uint32_t size = sizeof(path);
+    NSString *jbrootPath = nil;
     
-    // 搜索 .jbroot 目录
-    NSString *appDir = @"/var/containers/Bundle/Application";
-    NSArray *appContents = [fm contentsOfDirectoryAtPath:appDir error:nil];
-    for (NSString *item in appContents) {
-        if ([item hasPrefix:@".jbroot-"]) {
-            NSString *jbrootPath = [appDir stringByAppendingPathComponent:item];
-            NSString *pluginDir = [jbrootPath stringByAppendingPathComponent:@"/Library/MobileSubstrate/DynamicLibraries"];
-            if ([fm fileExistsAtPath:pluginDir]) {
-                [allPluginDirs addObject:pluginDir];
+    if (_NSGetExecutablePath(path, &size) == 0) {
+        NSString *execPath = [NSString stringWithUTF8String:path];
+        NSRange range = [execPath rangeOfString:@".jbroot-"];
+        if (range.location != NSNotFound) {
+            NSRange slashRange = [execPath rangeOfString:@"/" options:NSBackwardsSearch range:NSMakeRange(0, range.location)];
+            if (slashRange.location != NSNotFound) {
+                NSRange endRange = [execPath rangeOfString:@"/" options:0 range:NSMakeRange(range.location + range.length, execPath.length - range.location - range.length)];
+                if (endRange.location != NSNotFound) {
+                    jbrootPath = [execPath substringToIndex:endRange.location];
+                    [result appendFormat:@"jbroot 根: %@\n\n", jbrootPath];
+                }
             }
         }
     }
     
+    // 收集所有可能的插件目录
+    NSMutableArray *allPluginDirs = [NSMutableArray array];
+    
+    if (jbrootPath) {
+        [allPluginDirs addObject:[jbrootPath stringByAppendingPathComponent:@"Library/MobileSubstrate/DynamicLibraries"]];
+        [allPluginDirs addObject:[jbrootPath stringByAppendingPathComponent:@"usr/lib/TweakInject"]];
+    }
+    
     [result appendString:@"=== 找到的插件目录 ===\n"];
     for (NSString *dir in allPluginDirs) {
-        [result appendFormat:@"  %@\n", dir];
+        BOOL exists = [fm fileExistsAtPath:dir];
+        [result appendFormat:@"  %@ (%@)\n", dir, exists ? @"存在" : @"不存在"];
     }
     [result appendString:@"\n"];
     
     // 遍历每个目录，解析 plist
     for (NSString *pluginDir in allPluginDirs) {
+        BOOL dirExists = [fm fileExistsAtPath:pluginDir];
+        if (!dirExists) {
+            [result appendFormat:@"--- %@ 不存在 ---\n\n", pluginDir];
+            continue;
+        }
+        
         [result appendFormat:@"========================================\n"];
         [result appendFormat:@"目录: %@\n", pluginDir];
         [result appendFormat:@"========================================\n\n"];
         
         NSArray *contents = [fm contentsOfDirectoryAtPath:pluginDir error:nil];
+        if (!contents) {
+            [result appendString:@"  无法读取目录\n\n"];
+            continue;
+        }
         
         // 收集所有 plist 文件
         NSMutableArray *plistFiles = [NSMutableArray array];
@@ -115,20 +134,8 @@
                         [result appendFormat:@"      - %@\n", cls];
                     }
                 }
-                
-                // CoreFoundationVersion
-                id cfVersion = filter[@"CoreFoundationVersion"];
-                if (cfVersion) {
-                    [result appendFormat:@"    CoreFoundationVersion: %@\n", cfVersion];
-                }
             } else {
                 [result appendString:@"  没有 Filter 字段\n"];
-            }
-            
-            // IsTweakManager
-            id isTweakManager = plist[@"IsTweakManager"];
-            if (isTweakManager) {
-                [result appendFormat:@"  IsTweakManager: %@\n", isTweakManager];
             }
             
             [result appendString:@"\n"];

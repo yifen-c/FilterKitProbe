@@ -14,10 +14,11 @@
     textView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     textView.backgroundColor = [UIColor blackColor];
     textView.textColor = [UIColor whiteColor];
-    textView.font = [UIFont systemFontOfSize:12];
+    textView.font = [UIFont systemFontOfSize:11];
     textView.editable = NO;
     
     NSMutableString *result = [NSMutableString string];
+    NSFileManager *fm = [NSFileManager defaultManager];
     
     // 基本进程信息
     [result appendString:@"=== 进程基本信息 ===\n"];
@@ -31,62 +32,84 @@
     [result appendString:@"\n=== 可执行文件路径 ===\n"];
     char path[PATH_MAX];
     uint32_t size = sizeof(path);
+    NSString *execPath = nil;
     if (_NSGetExecutablePath(path, &size) == 0) {
-        [result appendFormat:@"路径: %s\n", path];
+        execPath = [NSString stringWithUTF8String:path];
+        [result appendFormat:@"路径: %@\n", execPath];
     }
     
-    // 测试关键目录访问权限
-    [result appendString:@"\n=== 目录访问测试 ===\n"];
-    NSArray *testPaths = @[
+    // 从可执行文件路径反推 jbroot 根目录
+    [result appendString:@"\n=== 反推 jbroot 根目录 ===\n"];
+    NSString *jbrootPath = nil;
+    if (execPath) {
+        NSRange range = [execPath rangeOfString:@".jbroot-"];
+        if (range.location != NSNotFound) {
+            // 找到 .jbroot- 的位置，往前找到 /
+            NSRange slashRange = [execPath rangeOfString:@"/" options:NSBackwardsSearch range:NSMakeRange(0, range.location)];
+            if (slashRange.location != NSNotFound) {
+                // 从 / 开始，到 .jbroot-XXXXXX 结束
+                NSRange endRange = [execPath rangeOfString:@"/" options:0 range:NSMakeRange(range.location + range.length, execPath.length - range.location - range.length)];
+                if (endRange.location != NSNotFound) {
+                    jbrootPath = [execPath substringToIndex:endRange.location];
+                    [result appendFormat:@"反推结果: %@\n", jbrootPath];
+                    
+                    // 验证这个路径
+                    BOOL isDir;
+                    BOOL exists = [fm fileExistsAtPath:jbrootPath isDirectory:&isDir];
+                    [result appendFormat:@"  存在: %@\n", exists ? @"是" : @"否"];
+                    if (exists) {
+                        [result appendFormat:@"  是目录: %@\n", isDir ? @"是" : @"否"];
+                        [result appendFormat:@"  可读: %@\n", [fm isReadableFileAtPath:jbrootPath] ? @"是" : @"否"];
+                        [result appendFormat:@"  可写: %@\n", [fm isWritableFileAtPath:jbrootPath] ? @"是" : @"否"];
+                    }
+                }
+            }
+        }
+    }
+    
+    // 基于 jbroot 根目录测试关键路径
+    if (jbrootPath) {
+        [result appendString:@"\n=== 基于 jbroot 测试关键目录 ===\n"];
+        
+        NSArray *testPaths = @[
+            @"Library/MobileSubstrate/DynamicLibraries",
+            @"usr/lib/TweakInject",
+            @"Library/LaunchDaemons",
+            @"var/mobile/Library",
+            @"var/mobile/Library/Preferences",
+            @"usr/bin",
+            @"Library/Frameworks"
+        ];
+        
+        for (NSString *relativePath in testPaths) {
+            NSString *fullPath = [jbrootPath stringByAppendingPathComponent:relativePath];
+            BOOL isDir;
+            BOOL exists = [fm fileExistsAtPath:fullPath isDirectory:&isDir];
+            
+            [result appendFormat:@"%@\n", relativePath];
+            [result appendFormat:@"  存在: %@\n", exists ? @"是" : @"否"];
+            if (exists) {
+                [result appendFormat:@"  可读: %@\n", [fm isReadableFileAtPath:fullPath] ? @"是" : @"否"];
+                [result appendFormat:@"  可写: %@\n", [fm isWritableFileAtPath:fullPath] ? @"是" : @"否"];
+            }
+        }
+    }
+    
+    // 测试标准路径
+    [result appendString:@"\n=== 标准路径测试 ===\n"];
+    NSArray *standardPaths = @[
         @"/var/mobile",
         @"/var/containers/Bundle/Application",
         @"/Library/MobileSubstrate/DynamicLibraries",
         @"/var/jb/Library/MobileSubstrate/DynamicLibraries",
-        @"/var/run",
-        @"/private/var/run"
+        @"/var/run"
     ];
     
-    for (NSString *testPath in testPaths) {
-        NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *testPath in standardPaths) {
         BOOL isDir;
         BOOL exists = [fm fileExistsAtPath:testPath isDirectory:&isDir];
-        NSDictionary *attrs = [fm attributesOfItemAtPath:testPath error:nil];
-        NSNumber *perms = [attrs objectForKey:NSFilePosixPermissions];
-        
-        [result appendFormat:@"路径: %@\n", testPath];
-        [result appendFormat:@"  存在: %@\n", exists ? @"是" : @"否"];
-        if (exists) {
-            [result appendFormat:@"  是目录: %@\n", isDir ? @"是" : @"否"];
-            [result appendFormat:@"  权限: %o\n", [perms intValue]];
-            [result appendFormat:@"  可读: %@\n", [fm isReadableFileAtPath:testPath] ? @"是" : @"否"];
-            [result appendFormat:@"  可写: %@\n", [fm isWritableFileAtPath:testPath] ? @"是" : @"否"];
-            [result appendFormat:@"  可执行: %@\n", [fm isExecutableFileAtPath:testPath] ? @"是" : @"否"];
-        }
-        [result appendString:@"\n"];
+        [result appendFormat:@"%@: %@\n", testPath, exists ? @"存在" : @"不存在"];
     }
-    
-    // 搜索 .jbroot 目录
-    [result appendString:@"=== 搜索 .jbroot 目录 ===\n"];
-    NSString *appDir = @"/var/containers/Bundle/Application";
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray *contents = [fm contentsOfDirectoryAtPath:appDir error:nil];
-    int count = 0;
-    for (NSString *item in contents) {
-        if ([item hasPrefix:@".jbroot-"]) {
-            count++;
-            NSString *fullPath = [appDir stringByAppendingPathComponent:item];
-            [result appendFormat:@"找到: %@\n", fullPath];
-            
-            // 测试这个目录下的子目录
-            NSArray *subPaths = @[@"Library", @"usr", @"var"];
-            for (NSString *sub in subPaths) {
-                NSString *subPath = [fullPath stringByAppendingPathComponent:sub];
-                BOOL exists = [fm fileExistsAtPath:subPath];
-                [result appendFormat:@"  %@: %@\n", sub, exists ? @"存在" : @"不存在"];
-            }
-        }
-    }
-    [result appendFormat:@"共找到 %d 个 .jbroot 目录\n", count];
     
     textView.text = result;
     [self.view addSubview:textView];
