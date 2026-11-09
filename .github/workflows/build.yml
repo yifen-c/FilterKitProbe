@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: FilterKitProbe 0.0.1 (${{ inputs.package_scheme }})
+    name: FilterKitProbe 0.0.4 (${{ inputs.package_scheme }})
     runs-on: macos-latest
     steps:
       - name: Checkout source
@@ -56,14 +56,14 @@ jobs:
 
           deb="$(ls -t packages/*.deb | head -n 1)"
           test -f "$deb"
-          cp "$deb" "build-artifacts/FilterKitProbe-0.0.1-${PACKAGE_SCHEME}.deb"
+          cp "$deb" "build-artifacts/FilterKitProbe-0.0.4-${PACKAGE_SCHEME}.deb"
 
           test "$(find build-artifacts -maxdepth 1 -type f -name '*.deb' | wc -l | tr -d ' ')" -ge 1
 
       - name: Upload Debian package
         uses: actions/upload-artifact@v5
         with:
-          name: FilterKitProbe-0.0.1-${{ inputs.package_scheme }}
+          name: FilterKitProbe-0.0.4-${{ inputs.package_scheme }}
           path: build-artifacts/*.deb
           if-no-files-found: error
           retention-days: 14
